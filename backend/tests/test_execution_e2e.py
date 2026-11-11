@@ -218,3 +218,37 @@ def test_position_management_partial_and_break_even(stack):
     p = fake.positions[ticket]
     assert p["volume"] < float(o.volume) and p["sl"] >= 1.1001
     _ = get_settings
+
+
+def test_tls_pinning_and_ip_allowlist(tmp_path):
+    """Self-signed connector cert is accepted only when pinned; non-allow-listed IPs are refused."""
+    import subprocess
+    import sys as _sys
+    gen = os.path.join(os.path.dirname(__file__), "..", "..", "mt5-connector", "windows", "gen_cert.py")
+    subprocess.run([_sys.executable, gen, str(tmp_path), "127.0.0.1"], check=True, capture_output=True)
+    crt, key = str(tmp_path / "connector.crt"), str(tmp_path / "connector.key")
+
+    def serve(allowed):
+        app = create_app(ConnectorConfig(SECRET, 1001, "Demo-Server", journal_path=str(tmp_path / f"j{len(allowed)}.db"),
+                                         allowed_ips=allowed), MT5Adapter(FakeMT5()), connect=False)
+        port = free_port()
+        srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, ssl_certfile=crt, ssl_keyfile=key,
+                                            log_level="warning"))
+        threading.Thread(target=srv.run, daemon=True).start()
+        for _ in range(100):
+            if srv.started:
+                break
+            time.sleep(0.05)
+        return srv, port
+
+    srv, port = serve(["127.0.0.1/32"])
+    assert BridgeClient(BridgeConfig(f"https://127.0.0.1:{port}", SECRET, ca_bundle=crt)).health()["connected"]
+    with pytest.raises(BridgeUnavailable, match="CERTIFICATE_VERIFY_FAILED"):
+        BridgeClient(BridgeConfig(f"https://127.0.0.1:{port}", SECRET)).health()
+    srv.should_exit = True
+    srv2, port2 = serve(["10.9.9.9/32"])
+    from app.execution.bridge import BridgeRejected
+    with pytest.raises(BridgeRejected) as ei:
+        BridgeClient(BridgeConfig(f"https://127.0.0.1:{port2}", SECRET, ca_bundle=crt)).health()
+    assert ei.value.status == 403
+    srv2.should_exit = True

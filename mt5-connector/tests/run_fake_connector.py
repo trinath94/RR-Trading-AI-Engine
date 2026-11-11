@@ -44,4 +44,4 @@ def rates(name, tf, start, count):
 fake.copy_rates_from_pos = rates
 cfg = ConnectorConfig(os.environ["RR_BRIDGE_SHARED_SECRET"], fake.login, fake.server,
                       journal_path=os.environ.get("RR_JOURNAL_PATH", "/tmp/rr-fake-journal.db"))
-uvicorn.run(create_app(cfg, MT5Adapter(fake), connect=False), host="127.0.0.1", port=int(os.environ.get("RR_PORT", "8443")))
+uvicorn.run(create_app(cfg, MT5Adapter(fake), connect=False), host=os.environ.get("RR_BIND", "127.0.0.1"), port=int(os.environ.get("RR_PORT", "8443")))

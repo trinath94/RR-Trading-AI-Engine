@@ -11,3 +11,7 @@ frontend/out/
 backups/
 secrets/
 .pytest_cache/
+nginx/certs/
+nginx/acme/
+frontend/next-env.d.ts.bak
+*.tsbuildinfo

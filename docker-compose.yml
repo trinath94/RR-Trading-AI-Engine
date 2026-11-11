@@ -55,6 +55,20 @@ services:
       retries: 3
     networks: [internal, egress]
 
+  learner:   # Part 25/26: learning & intelligence jobs, isolated from the trading worker (never places orders)
+    <<: *backend
+    command: ["python", "-m", "app.learning_engine.scheduler"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    cpus: "2.0"
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import redis,os,sys;sys.exit(0 if redis.Redis.from_url(os.environ['RR_REDIS_URL']).exists('rr:learner:lock') else 1)\""]
+      interval: 60s
+      retries: 3
+    networks: [internal, egress]
+
   frontend:
     build: {context: ., dockerfile: docker/frontend.Dockerfile}
     image: rr-frontend:latest

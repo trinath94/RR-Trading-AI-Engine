@@ -262,10 +262,6 @@ def experiments(_: User = Depends(current_user), db: Session = Depends(get_db)):
             for e in db.scalars(select(StrategyExperiment).order_by(StrategyExperiment.id.desc()))]
 
 
-STAGES = ["RESEARCH", "IMPLEMENTATION", "UNIT_TESTING", "BACKTESTING", "OUT_OF_SAMPLE", "WALK_FORWARD", "PAPER_TRADING",
-          "ADMIN_APPROVAL", "PRODUCTION", "REJECTED"]
-
-
 class StageIn(BaseModel):
     stage: str
     evidence: dict = Field(default_factory=dict)
@@ -274,23 +270,26 @@ class StageIn(BaseModel):
 @router.post("/experiments/{exp_id}/stage")
 def experiment_stage(exp_id: int, body: StageIn, user: User = Depends(require("strategy.manage")),
                      db: Session = Depends(get_db)):
+    """Backward compatible: legacy stage names (RESEARCH, IMPLEMENTATION, ...) are mapped onto the Part 25
+    lifecycle. Evidence gates are enforced by app.strategies.experimental.lifecycle."""
+    from app.strategies.experimental import lifecycle
     e = db.get(StrategyExperiment, exp_id)
-    if not e or body.stage not in STAGES:
-        raise HTTPException(400, "bad experiment/stage")
-    cur = STAGES.index(e.stage)
-    nxt = STAGES.index(body.stage)
-    if body.stage != "REJECTED" and nxt != cur + 1:
-        raise HTTPException(409, f"Stages must advance in order: {e.stage} -> {STAGES[cur + 1]}")
-    if body.stage == "PRODUCTION":
-        raise HTTPException(409, "Production promotion requires a code-reviewed module registered in "
-                                 "app.strategies.registry; record approval here, then deploy the module.")
-    e.stage = body.stage
-    e.evidence = {**(e.evidence or {}), body.stage: {**body.evidence, "by": user.username,
-                                                     "at": datetime.now(UTC).isoformat()}}
-    if body.stage == "ADMIN_APPROVAL":
+    if not e:
+        raise HTTPException(404, "experiment not found")
+    try:
+        lifecycle.transition(db, e, body.stage, user.id, json_notes(body.evidence))
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(409, str(exc)) from None
+    e.evidence = {**(e.evidence or {}), e.stage: {**body.evidence, "by": user.username, "at": datetime.now(UTC).isoformat()}}
+    if e.stage == "APPROVED":
         e.approved_by = user.id
-    audit(db, user.id, "EXPERIMENT_STAGE", e.title, {"stage": body.stage})
+    audit(db, user.id, "EXPERIMENT_STAGE", e.title, {"stage": e.stage})
     return {"ok": True, "stage": e.stage}
+
+
+def json_notes(d: dict) -> str:
+    import json
+    return json.dumps(d, default=str)[:2000] if d else ""
 
 
 # ---- backtesting ------------------------------------------------------------------------------------

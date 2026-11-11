@@ -45,7 +45,13 @@ def migrated_db():
 TRANSIENT = ["login_history", "user_sessions", "audit_logs", "notifications", "system_events", "trade_executions",
              "trade_orders", "risk_evaluations", "execution_idempotency", "open_positions", "closed_positions",
              "account_snapshots", "trading_signals", "analysis_results", "agent_decisions", "agent_conversations",
-             "symbols", "trading_accounts", "broker_connections", "mt5_terminals", "users"]
+             "symbols", "trading_accounts", "broker_connections", "mt5_terminals", "users",
+             # Part 25/26
+             "mt5_deals", "sync_states", "trade_features", "performance_snapshots", "learning_memory",
+             "regime_history", "model_predictions", "model_registry", "consensus_decisions", "anomaly_events",
+             "portfolio_snapshots", "failure_reports", "missed_opportunities", "position_adjustments",
+             "strategy_fingerprints", "drift_events", "ai_recommendations", "approval_records", "learning_jobs",
+             "strategy_experiments"]
 
 
 @pytest.fixture

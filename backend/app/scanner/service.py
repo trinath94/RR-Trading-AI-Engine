@@ -119,7 +119,8 @@ def analyse(db: Session, bridge: BridgeClient, sym: Symbol, tf: str, enabled: di
     res = build_signal(sigs, mctx, cfg, calib)
     ar = AnalysisResult(symbol_id=sym.id, timeframe=tf, bar_time=df.index[-1].to_pydatetime(), regime=reg.primary,
                         structure={"regime": reg.dict(), "htf_bias": mctx.htf_bias, "sessions": mctx.sessions,
-                                   "news": news},
+                                   "news": news, "atr": mctx.atr, "price": mctx.price,
+                                   "spread_points": round(spread / float(sym.point), 2) if float(sym.point) else None},
                         strategy_outputs=[s.dict() for s in sigs] + [d for d in diag if d["status"] == "error"],
                         score=res.dict())
     db.add(ar)

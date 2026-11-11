@@ -396,6 +396,9 @@ class ClosedPosition(Base):
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     close_reason: Mapped[str] = mapped_column(String(32), default="")
     execution_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    mode: Mapped[str | None] = mapped_column(ACCOUNT_MODE)               # Part 25: DEMO/LIVE dataset separation
+    partial_exits: Mapped[int | None] = mapped_column(Integer)
+    sync_status: Mapped[str | None] = mapped_column(String(16))          # COMPLETE | PARTIAL | CORRECTED
     strategy_codes: Mapped[list] = mapped_column(JSONB, default=list)
     regime: Mapped[str | None] = mapped_column(String(32))
     timeframe: Mapped[str | None] = mapped_column(String(4))
@@ -580,9 +583,20 @@ class StrategyExperiment(TimestampMixin, Base):
     """Claude-proposed strategy research items, isolated from production."""
     __tablename__ = "strategy_experiments"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Part 25 additive columns (experimental development & lifecycle)
+    code: Mapped[str | None] = mapped_column(String(96), unique=True)
+    category: Mapped[str | None] = mapped_column(String(32))
+    version: Mapped[int | None] = mapped_column(Integer)
+    source_code: Mapped[str | None] = mapped_column(Text)
+    source_hash: Mapped[str | None] = mapped_column(String(64))
+    validation: Mapped[dict | None] = mapped_column(JSONB)
+    duplicate_of: Mapped[list | None] = mapped_column(JSONB)
     title: Mapped[str] = mapped_column(String(255))
     hypothesis: Mapped[str] = mapped_column(Text)
     proposal: Mapped[dict] = mapped_column(JSONB)
     stage: Mapped[str] = mapped_column(String(24), default="RESEARCH")
     evidence: Mapped[dict] = mapped_column(JSONB, default=dict)
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+
+
+from app.db import models_intel  # noqa: E402,F401  (Part 25/26 additive tables)

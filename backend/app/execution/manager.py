@@ -78,6 +78,10 @@ def _apply_result(db: Session, order: TradeOrder, res: dict) -> TradeOrder:
                f"price {res.get('price')} ticket {res.get('order')}", {"execution_id": order.execution_id})
     elif state in ("REJECTED", "FAILED"):
         order.status = "REJECTED" if state == "REJECTED" else "FAILED"
+        if res.get("retcode") and not db.scalar(select(TradeExecution.id).where(TradeExecution.order_id == order.id)):
+            # MT5's rejection answer (e.g. requote 10004) is recorded for execution analytics; it is not a fill.
+            db.add(TradeExecution(order_id=order.id, retcode=int(res["retcode"]), retcode_text=str(res.get("retcode_text") or ""),
+                                  latency_ms=res.get("latency_ms"), raw={k: v for k, v in res.items() if k != "request"}))
         order.status_detail = str(res.get("reason") or res.get("retcode_text") or state)
         if idem:
             idem.state = "FAILED"
@@ -160,17 +164,22 @@ def open_position(db: Session, bridge: BridgeClient, *, symbol: str, direction: 
     tick = bridge.tick(symbol)
     if not tick.get("bid") or not tick.get("ask"):
         raise ExecutionBlocked("No live quote; market closed or unavailable")
+    if tick.get("time") and datetime.now(UTC).timestamp() - float(tick["time"]) > _stale_limit():
+        raise ExecutionBlocked(f"Stale quote ({datetime.now(UTC).timestamp() - float(tick['time']):.0f}s old) cannot authorise an entry")
     entry = float(tick["ask"] if direction == "BUY" else tick["bid"]) if order_type == "MARKET" else float(price or 0)
-    spread_pts = (float(tick["ask"]) - float(tick["bid"])) / spec.point
+    spread_pts = round((float(tick["ask"]) - float(tick["bid"])) / spec.point, 1)   # avoid float noise (30.0000001 > 30)
     margin = bridge.margin(symbol, direction, 1.0, entry).get("margin")
     params = tr.risk_params(db, account.mode)
+    from app.intelligence import anomaly as anomaly_intel
+    from app.intelligence import portfolio as portfolio_intel
     control = risk.ControlState(state.kill_switch, state.risk_lock, state.pause_new_entries,
-                                _news_status(db, symbol, sym))
+                                _news_status(db, symbol, sym), anomaly_block=anomaly_intel.active_block(db, symbol))
     req = risk.OrderRequest(symbol, direction, entry, stop_loss, take_profit, spread_pts,
                             expected_slippage_points=params.max_slippage_points / 2, size_multiplier=size_multiplier,
                             expires_at=expires_at, source=source, strategy_codes=strategy_codes or [],
                             requested_volume=requested_volume, margin_required_per_lot=margin)
-    decision = risk.evaluate(req, spec, tr.account_state(db, account, snap), tr.open_risks(db, account), params, control)
+    decision = risk.evaluate(req, spec, tr.account_state(db, account, snap), tr.open_risks(db, account), params, control,
+                             corr=portfolio_intel.cached_corr())
     ev = RiskEvaluation(signal_id=signal.id if signal else None, account_id=account.id, approved=decision.approved,
                         volume=Decimal(str(decision.volume)), risk_amount=decision.risk_amount,
                         risk_percent=decision.risk_pct, checks=[c.__dict__ for c in decision.checks],
@@ -228,8 +237,20 @@ def manage(db: Session, bridge: BridgeClient, *, action: str, position_ticket: i
         raise ExecutionBlocked(f"Position {position_ticket} not found (sync positions)")
     if action == "MODIFY_SLTP" and stop_loss is not None:
         sgn = 1 if pos.direction == "BUY" else -1
+        reason = None
         if (float(pos.current_price or pos.open_price) - stop_loss) * sgn <= 0:
-            raise ExecutionBlocked("Stop loss would be beyond current price")
+            reason = "Stop loss would be beyond current price"
+        elif pos.stop_loss is not None and (stop_loss - float(pos.stop_loss)) * sgn < 0:
+            reason = (f"Refused: moving the stop from {float(pos.stop_loss)} to {stop_loss} widens risk "
+                      "(stops are never moved further away to avoid realising a loss)")
+        _log_adjustment(db, account.id, position_ticket, "stop_loss", float(pos.stop_loss) if pos.stop_loss else None,
+                        stop_loss, reason or f"{source} adjustment", reason is None)
+        if reason:
+            db.commit()
+            raise ExecutionBlocked(reason)
+    if action == "MODIFY_SLTP" and take_profit is not None:
+        _log_adjustment(db, account.id, position_ticket, "take_profit", float(pos.take_profit) if pos.take_profit else None,
+                        take_profit, f"{source} adjustment", True)
     eid, existing = _reserve(db, dedupe_key)
     if existing is not None:
         return existing
@@ -351,3 +372,15 @@ def kill_switch(db: Session, bridge: BridgeClient | None, user_id: int | None, r
 def _news_status(db: Session, name: str, sym: Symbol | None) -> str:
     from app.news.service import status_for
     return status_for(db, sym, name)[0]
+
+
+def _stale_limit() -> float:
+    from app.core.config import get_settings
+    return float(get_settings().max_quote_age_seconds)
+
+
+def _log_adjustment(db: Session, account_id: int, ticket: int, field: str, prev: float | None, new: float | None,
+                    reason: str, accepted: bool) -> None:
+    from app.db.models_intel import PositionAdjustment
+    db.add(PositionAdjustment(account_id=account_id, ticket=ticket, field=field, previous_value=prev, new_value=new,
+                              reason=reason[:1000], accepted=accepted))

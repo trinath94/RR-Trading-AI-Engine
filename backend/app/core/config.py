@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_to: str = ""
 
+    # Part 25/26
+    consensus_mode: str = "advisory"          # advisory | enforce (enforce downgrades disagreeing BUY/SELL to WAIT)
+    max_quote_age_seconds: int = 120          # stale quotes cannot authorise entries
+    regime_intel_enabled: bool = True
+    learner_interval_seconds: int = 60
+
     broker_timezone: str = "Etc/GMT-2"  # common MT5 server tz; override per broker
     cors_origins: str = "http://localhost:3000"
 

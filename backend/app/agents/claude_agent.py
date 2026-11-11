@@ -41,7 +41,12 @@ their suited regime, poor or statistically thin out-of-sample history, wide spre
 risk, stops inside obvious liquidity, and correlated exposure already open.
 - Do not output a probability or confidence percentage. The platform reports calibrated statistics separately.
 - You do not size positions or place orders; an independent Risk Engine validates everything after you.
-- Be concise and specific: cite the strategy codes and levels you relied on."""
+- Be concise and specific: cite the strategy codes and levels you relied on.
+- The candidate may include `historical_evidence` retrieved from this platform's own trade database,
+  `consensus` from independent specialists, a statistical `probability` estimate and `regime_intelligence`.
+  Weigh evidence by its sample size: anything below 30 trades is inconclusive. A probability marked
+  shadow, unavailable or LOW DATA CONFIDENCE must not be treated as support. Flag repeated loss causes
+  that apply to this setup. Specialist disagreement is a reason for caution, not something to explain away."""
 
 DECISIONS = ["BUY", "SELL", "NO_TRADE", "WAIT_FOR_CONFIRMATION"]
 

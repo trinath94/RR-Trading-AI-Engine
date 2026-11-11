@@ -117,17 +117,87 @@ def analyse(db: Session, bridge: BridgeClient, sym: Symbol, tf: str, enabled: di
                          ctx.atr_last(), spread, reg.primary, reg.tags, ctx.htf_bias(), ss.current_sessions(pd.Timestamp(now)),
                          news, {k: metas[k].regimes for k in enabled}, stats)
     res = build_signal(sigs, mctx, cfg, calib)
+    intel, consensus_rec = _intelligence(db, df, sym, tf, sigs, res, news, tick, mctx, metas, enabled)
     ar = AnalysisResult(symbol_id=sym.id, timeframe=tf, bar_time=df.index[-1].to_pydatetime(), regime=reg.primary,
                         structure={"regime": reg.dict(), "htf_bias": mctx.htf_bias, "sessions": mctx.sessions,
                                    "news": news, "atr": mctx.atr, "price": mctx.price,
                                    "spread_points": round(spread / float(sym.point), 2) if float(sym.point) else None},
                         strategy_outputs=[s.dict() for s in sigs] + [d for d in diag if d["status"] == "error"],
-                        score=res.dict())
+                        score={**res.dict(), "intelligence": intel})
     db.add(ar)
     db.flush()
+    if consensus_rec is not None:
+        consensus_rec.analysis_id = ar.id
     agent_activity("market_scanner", "evaluating", f"{sym.broker_symbol} {tf}: {len(sigs)} setups, "
                                                    f"{res.decision} {res.grade} ({res.score})")
-    return {"analysis": ar, "result": res, "symbol": sym, "regime": reg, "price": mctx.price, "spread": spread}
+    return {"analysis": ar, "result": res, "symbol": sym, "regime": reg, "price": mctx.price, "spread": spread,
+            "intel": intel, "consensus_record": consensus_rec}
+
+
+def _intelligence(db: Session, df, sym, tf, sigs, res, news, tick, mctx, metas, enabled):
+    """Part 26 enrichment. Advisory by default; with RR_CONSENSUS_MODE=enforce a BUY/SELL that the
+    consensus does not support is downgraded to WAIT (never upgraded)."""
+    from app.intelligence import anomaly as anomaly_intel
+    from app.intelligence import consensus, probability
+    from app.intelligence import regime as regime_intel
+    from app.db.models_intel import RegimeHistory
+    s = get_settings()
+    out: dict = {}
+    rec = None
+    try:
+        found = anomaly_intel.detect(df, tick, tf, float(sym.point), news_status=news,
+                                     stale_seconds=s.max_quote_age_seconds)
+        out["anomalies"] = {"found": found, **anomaly_intel.record(db, sym.broker_symbol, found)}
+    except Exception as exc:  # noqa: BLE001 - intelligence must never break the scan
+        out["anomalies"] = {"error": str(exc)[:200]}
+    ri = None
+    if s.regime_intel_enabled:
+        try:
+            r = regime_intel.analyse(df, news, {k: metas[k].regimes for k in enabled})
+            ri = r.dict()
+            ri_small = {k: ri[k] for k in ("regime", "probabilities", "confidence", "stability", "transition_warning",
+                                           "model_version")}
+            out["regime"] = {**ri_small, "suitable_count": len(r.suitable), "unsuitable_count": len(r.unsuitable)}
+            exists = db.scalar(select(RegimeHistory.id).where(RegimeHistory.symbol == sym.broker_symbol,
+                                                              RegimeHistory.timeframe == tf,
+                                                              RegimeHistory.bar_time == df.index[-1].to_pydatetime(),
+                                                              RegimeHistory.model_version == r.model_version))
+            if not exists:
+                db.add(RegimeHistory(symbol=sym.broker_symbol, timeframe=tf, bar_time=df.index[-1].to_pydatetime(),
+                                     regime=r.regime, probabilities=r.probabilities, confidence=r.confidence,
+                                     stability=r.stability, transition_warning=r.transition_warning,
+                                     suitable=r.suitable, unsuitable=r.unsuitable, details=r.details,
+                                     model_version=r.model_version))
+        except Exception as exc:  # noqa: BLE001
+            out["regime"] = {"error": str(exc)[:200]}
+    if res.decision in ("BUY", "SELL", "WAIT") and res.direction:
+        lead = next((x for x in sigs if x.direction == res.direction), None)
+        prob = None
+        if lead is not None:
+            try:
+                sp_pts = (mctx.spread / float(sym.point)) if float(sym.point) else 0.0
+                prob = probability.estimate(db, df, lead.dict(), sum(1 for x in sigs if x.direction == res.direction),
+                                            sp_pts, float(sym.point), sym.broker_symbol, tf)
+            except Exception as exc:  # noqa: BLE001
+                prob = {"available": False, "status": f"error: {str(exc)[:120]}"}
+        out["probability"] = prob
+        gates = []
+        blocking = (out.get("anomalies") or {}).get("blocking") or []
+        if blocking:
+            gates.append(f"critical anomaly: {blocking}")
+        if news == "RESTRICTED":
+            gates.append("news restriction window")
+        cats = {code: metas[code].category for code in enabled}
+        cons = consensus.run(db, sigs, cats, ri, prob, gates, res.direction,
+                             record={"symbol": sym.broker_symbol, "timeframe": tf})
+        rec = cons.pop("record", None)
+        out["consensus"] = {k: cons[k] for k in ("decision", "agreement", "conflicts", "weights_version", "explanation")}
+        out["consensus"]["specialists"] = [{"specialist": v["specialist"], "decision": v["decision"],
+                                            "confidence": v["confidence"]} for v in cons["specialists"]]
+        if s.consensus_mode == "enforce" and res.decision in ("BUY", "SELL") and cons["decision"] != res.decision:
+            res.decision = "WAIT"
+            res.warnings.append(f"consensus {cons['decision']} (enforce mode): downgraded to WAIT")
+    return out, rec
 
 
 def persist_signal(db: Session, item: dict) -> TradingSignal | None:
@@ -141,6 +211,8 @@ def persist_signal(db: Session, item: dict) -> TradingSignal | None:
                         explanation=r.explanation, expires_at=r.expires_at)
     db.add(sig)
     db.flush()
+    if item.get("consensus_record") is not None:
+        item["consensus_record"].signal_id = sig.id
     publish("signal", {"id": sig.id, "symbol": item["symbol"].broker_symbol, "decision": sig.decision, "grade": sig.grade,
                        "score": sig.score, "timeframe": sig.timeframe})
     if r.grade == "A+":
@@ -172,7 +244,11 @@ def claude_review(db: Session, agent: ClaudeAgent, sig: TradingSignal, item: dic
         return
     conv.response, conv.input_tokens, conv.output_tokens = review.model_dump(), meta["input_tokens"], meta["output_tokens"]
     conv.latency_ms, conv.model = meta["latency_ms"], meta["model"]
-    sig.ai_review = review.model_dump()
+    prob = extra.get("probability") or {}
+    sig.ai_review = {**review.model_dump(), "model_versions": {
+        "claude": meta["model"], "consensus": (extra.get("consensus") or {}).get("weights_version"),
+        "probability": prob.get("model") if prob.get("available") else None,
+        "regime": (extra.get("regime_intelligence") or {}).get("model_version")}}
     db.add(AgentDecision(conversation_id=conv.id, signal_id=sig.id, symbol=item["symbol"].broker_symbol,
                          decision=review.decision, payload=review.model_dump()))
     if review.decision == "NO_TRADE":
@@ -225,7 +301,7 @@ def scan_once(bridge: BridgeClient, agent: ClaudeAgent | None, auto_execute) -> 
                 sym = db.get(Symbol, sig.symbol_id)
                 item = {"result": _ResultView(sig, ar), "symbol": sym, "analysis": ar,
                         "price": float(sig.entry or 0), "spread": 0.0, "regime": _RegimeView(ar)}
-                claude_review(db, agent, sig, item, {})
+                claude_review(db, agent, sig, item, _review_extra(db, sig, sym, ar, mode))
             elif not s.anthropic_api_key:
                 sig.ai_review = {"decision": "UNREVIEWED", "error": "Claude API key not configured"}
         auto_execute(r["signal_id"])
@@ -250,6 +326,21 @@ class _RegimeView:
 
     def dict(self):
         return self._d
+
+
+def _review_extra(db: Session, sig: TradingSignal, sym: Symbol, ar: AnalysisResult, mode: str) -> dict:
+    """Historical evidence (structured SQL retrieval) + Part 26 intelligence for the Claude reviewer."""
+    from app.learning_engine.memory import retrieve_evidence
+    intel = (ar.score or {}).get("intelligence", {})
+    sessions = (ar.structure or {}).get("sessions") or []
+    sess = "+".join(x for x in sessions if x in ("ASIA", "LONDON", "NEW_YORK", "OVERLAP")) or "OFF_SESSION"
+    try:
+        ev = retrieve_evidence(db, mode, sym.broker_symbol, sig.timeframe, sorted({x["strategy"] for x in sig.strategies}),
+                               ar.regime, sess)
+    except Exception as exc:  # noqa: BLE001
+        ev = {"error": str(exc)[:200]}
+    return {"historical_evidence": ev, "consensus": intel.get("consensus"), "probability": intel.get("probability"),
+            "regime_intelligence": intel.get("regime"), "anomalies": (intel.get("anomalies") or {}).get("found")}
 
 
 def expire_signals(db: Session) -> int:

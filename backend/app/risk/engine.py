@@ -146,6 +146,7 @@ class ControlState:
     pause_new_entries: bool = False
     news_status: str = "UNKNOWN"     # CLEAR | RESTRICTED | UNKNOWN
     realized_today: float = 0.0
+    anomaly_block: str | None = None  # Part 26: unresolved critical market/feed anomaly on this symbol
 
 
 @dataclass
@@ -281,6 +282,8 @@ def evaluate(req: OrderRequest, spec: SymbolSpec, acct: AccountState, positions:
             if params.news_unknown_blocks else "News risk UNKNOWN (allowed by policy)")
     else:
         add("news", True, "clear")
+    if control.anomaly_block:
+        add("market_anomaly", False, f"Critical anomaly active: {control.anomaly_block}")
 
     # --- Account-level loss limits (these lock trading) ------------------------------------
     def loss_pct(start: float) -> float:

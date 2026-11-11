@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ClosedPosition
 from app.db.models_intel import DriftEvent, ModelPrediction, ModelRegistry, TradeFeatures
-from app.learning_engine.performance import bootstrap_ci
+from app.learning_engine.performance import bootstrap_ci, learnable
 from app.notifications.service import notify
 
 UTC = timezone.utc
@@ -78,7 +78,7 @@ def check(db: Session, days: int = 14) -> dict:
 def strategy_deterioration(db: Session, window: int = 30) -> list[DriftEvent]:
     out = []
     rows = db.execute(select(ClosedPosition.strategy_codes, ClosedPosition.profit, ClosedPosition.commission,
-                             ClosedPosition.swap, ClosedPosition.mode).order_by(ClosedPosition.closed_at)).all()
+                             ClosedPosition.swap, ClosedPosition.mode).where(learnable()).order_by(ClosedPosition.closed_at)).all()
     per: dict[tuple[str, str], list[float]] = {}
     for codes, p, c, s, mode in rows:
         for code in codes or []:

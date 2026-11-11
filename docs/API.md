@@ -2,6 +2,8 @@
 
 OpenAPI is served at `/api/docs` outside production. All routes except `/api/health`, `/api/auth/login` and `/api/auth/password-reset/confirm` require the session cookie; non-GET routes also require `X-CSRF-Token`.
 
+Part 25/26 added the `/api/learning/*` and `/api/intelligence/*` groups; all earlier routes are unchanged.
+
 | Method | Path |
 |---|---|
 | GET | `/api/accounts` |
@@ -32,6 +34,41 @@ OpenAPI is served at `/api/docs` outside production. All routes except `/api/hea
 | GET | `/api/experiments` |
 | POST | `/api/experiments/{exp_id}/stage` |
 | GET | `/api/health` |
+| GET | `/api/intelligence/adjustments` |
+| GET | `/api/intelligence/anomalies` |
+| POST | `/api/intelligence/anomalies/{anomaly_id}/resolve` |
+| GET | `/api/intelligence/consensus` |
+| GET | `/api/intelligence/consensus/analytics` |
+| GET | `/api/intelligence/execution` |
+| GET | `/api/intelligence/fingerprints` |
+| GET | `/api/intelligence/portfolio` |
+| GET | `/api/intelligence/probability` |
+| GET | `/api/intelligence/regimes` |
+| GET | `/api/intelligence/regimes/{symbol}` |
+| GET | `/api/intelligence/signals/{signal_id}` |
+| GET | `/api/learning/approvals` |
+| GET | `/api/learning/drift` |
+| GET | `/api/learning/experiments` |
+| POST | `/api/learning/experiments/library` |
+| GET | `/api/learning/experiments/{exp_id}` |
+| POST | `/api/learning/experiments/{exp_id}/develop` |
+| POST | `/api/learning/experiments/{exp_id}/rollback` |
+| POST | `/api/learning/experiments/{exp_id}/source` |
+| POST | `/api/learning/experiments/{exp_id}/unit` |
+| GET | `/api/learning/failures` |
+| GET | `/api/learning/jobs` |
+| POST | `/api/learning/jobs/{name}/run` |
+| GET | `/api/learning/memory` |
+| GET | `/api/learning/models` |
+| POST | `/api/learning/models/{model_id}/transition` |
+| POST | `/api/learning/models/{model_key}/rollback` |
+| GET | `/api/learning/overview` |
+| GET | `/api/learning/performance` |
+| GET | `/api/learning/performance/correlation` |
+| GET | `/api/learning/recommendations` |
+| PATCH | `/api/learning/recommendations/{rec_id}` |
+| POST | `/api/learning/research` |
+| GET | `/api/learning/trades` |
 | GET | `/api/market/{symbol}/overlays` |
 | GET | `/api/market/{symbol}/rates` |
 | GET | `/api/market/{symbol}/tick` |

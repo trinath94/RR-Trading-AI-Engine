@@ -28,6 +28,7 @@ UTC = timezone.utc
 ENTRY_IN, ENTRY_OUT, ENTRY_INOUT, ENTRY_OUT_BY = 0, 1, 2, 3
 TRADE_DEAL_TYPES = (0, 1)    # DEAL_TYPE_BUY / DEAL_TYPE_SELL; balance/credit/etc. are excluded
 OVERLAP = timedelta(hours=6)  # re-read a window to catch late-arriving or corrected deals
+INCONSISTENT = "INCONSISTENT"  # sync_status of a position whose deals do not reconcile; excluded from learning
 
 
 def _ts(v) -> datetime:
@@ -77,6 +78,15 @@ def aggregate_position(deals: list[MT5Deal]) -> dict | None:
     first_in = min(ins, key=lambda d: d.deal_time)
     last_out = max(outs, key=lambda d: d.deal_time)
     reason = {4: "STOP_LOSS", 5: "TAKE_PROFIT", 6: "STOP_OUT"}.get(last_out.reason, "CLOSED")
+    problems = []
+    if out_vol > in_vol + 1e-9:
+        problems.append(f"exit volume {out_vol:g} > entry volume {in_vol:g}")
+    if any(d.deal_time < first_in.deal_time for d in outs if d.entry != ENTRY_INOUT):
+        problems.append("exit deal precedes the first entry")
+    if any(d.deal_type == first_in.deal_type for d in outs if d.entry == ENTRY_OUT):
+        problems.append("exit deal on the same side as the entry")
+    if len({d.symbol for d in deals}) > 1:
+        problems.append("deals on more than one symbol")
     return {
         "position_id": first_in.position_id, "symbol": first_in.symbol,
         "direction": "BUY" if first_in.deal_type == 0 else "SELL",
@@ -84,7 +94,7 @@ def aggregate_position(deals: list[MT5Deal]) -> dict | None:
         "profit": sum(d.profit for d in deals), "commission": sum(d.commission + d.fee for d in deals),
         "swap": sum(d.swap for d in deals), "opened_at": first_in.deal_time, "closed_at": last_out.deal_time,
         "partial_exits": len(outs), "complete": out_vol + 1e-9 >= in_vol, "close_reason": reason,
-        "comment": first_in.comment,
+        "comment": first_in.comment, "problems": problems,
     }
 
 
@@ -171,6 +181,16 @@ def sync_account_history(db: Session, bridge: BridgeClient, account: TradingAcco
     closed_ids = []
     for pid, ds in by_pos.items():
         agg = aggregate_position(ds)
+        if agg is not None and agg["problems"]:
+            # Never derive outcomes from a ledger that does not reconcile (e.g. reused position ids):
+            # flag it, keep the previously recorded values, and keep it out of learning.
+            results["inconsistent"] += 1
+            cp = db.scalar(select(ClosedPosition).where(ClosedPosition.account_id == account.id,
+                                                        ClosedPosition.ticket == pid))
+            if cp is not None and cp.sync_status != INCONSISTENT:
+                cp.sync_status = INCONSISTENT
+            log.warning("deal ledger for position %s does not reconcile: %s", pid, "; ".join(agg["problems"]))
+            continue
         if agg is None or pid in open_tickets or not agg["complete"]:
             results["still_open_or_partial"] += 1
             continue

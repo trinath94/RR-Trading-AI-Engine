@@ -51,7 +51,7 @@ def retrieve_evidence(db: Session, mode: str, symbol: str, timeframe: str | None
         perf_ev[f"{dim}:{key}"] = _compact(rows[0].metrics) if rows else {"sample_size": 0, "verdict": "NO_DATA"}
     ev["performance"] = perf_ev
     q = (select(ClosedPosition, TradeFeatures).join(TradeFeatures, TradeFeatures.closed_position_id == ClosedPosition.id)
-         .where(TradeFeatures.mode == mode, ClosedPosition.symbol == symbol)
+         .where(TradeFeatures.mode == mode, ClosedPosition.symbol == symbol, perf.learnable())
          .order_by(ClosedPosition.closed_at.desc()).limit(limit_trades))
     ev["recent_trades_same_symbol"] = [
         {"closed_at": cp.closed_at.isoformat(), "direction": cp.direction, "r": cp.r_multiple, "outcome": tf.outcome,

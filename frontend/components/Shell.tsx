@@ -2,7 +2,7 @@
 import clsx from "clsx";
 import {
   Activity, Bell, BookOpen, Bot, BrainCircuit, CandlestickChart, Cpu, FlaskConical, Gauge, History, LayoutDashboard,
-  LogOut, Menu, Newspaper, PieChart, Radar, Settings, ShieldAlert, Sliders, Terminal, Users, X, Zap,
+  LogOut, Menu, Newspaper, Sparkles, Target, PieChart, Radar, Settings, ShieldAlert, Sliders, Terminal, Users, X, Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -29,6 +29,8 @@ export const NAV = [
   { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/users", label: "User Management", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/learning", label: "AI Learning & Evolution", icon: Sparkles },
+  { href: "/predictive", label: "Predictive Intelligence", icon: Target },
 ];
 
 export type Me = { id: number; username: string; role: string; permissions: string[] };

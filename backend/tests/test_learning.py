@@ -36,6 +36,42 @@ def test_aggregate_partial_exits_vwap_and_costs():
     assert collector.aggregate_position(deals[:1]) is None
 
 
+def test_aggregate_flags_a_ledger_that_does_not_reconcile():
+    entry = d(1, 9, 0, 0, 1.0, 1.1000, minutes=10)
+    assert collector.aggregate_position([entry, d(2, 9, 1, 1, 1.0, 1.1050, minutes=20)])["problems"] == []
+    over = collector.aggregate_position([entry, d(2, 9, 1, 1, 1.0, 1.1050, minutes=20), d(3, 9, 1, 1, 0.5, 1.2, minutes=30)])
+    assert any("exit volume" in p for p in over["problems"])
+    early = collector.aggregate_position([entry, d(2, 9, 1, 1, 1.0, 1.1050, minutes=0)])
+    assert any("precedes" in p for p in early["problems"])
+    same_side = collector.aggregate_position([entry, d(2, 9, 1, 0, 1.0, 1.1050, minutes=20)])
+    assert any("same side" in p for p in same_side["problems"])
+
+
+def test_reused_position_id_is_flagged_and_never_learned_from(stack):
+    """A ledger that stops reconciling (e.g. a position id reused after a terminal reset) must not overwrite
+    the recorded outcome or produce an R multiple; the position is excluded from learning."""
+    fake, bridge = stack
+    allow_unknown_news()
+    worker.startup_checks(bridge)
+    with session_scope() as db:
+        open_eur(db, bridge, key="reuse-1")
+    ticket = next(iter(fake.positions))
+    with session_scope() as db:
+        em.manage(db, bridge, action="CLOSE", position_ticket=ticket, dedupe_key="reuse-close")
+        collector.sync_account_history(db, bridge, tr.active_account(db))
+        cp = db.scalar(select(ClosedPosition).where(ClosedPosition.ticket == ticket))
+        before = (float(cp.profit), cp.r_multiple)
+        assert len(perf.load_trades(db, "DEMO")) == 1
+    stray = dict(fake.deals[-1], ticket=fake.deals[-1]["ticket"] + 1000, volume=0.5)  # extra exit, same position id
+    fake.deals.append(stray)
+    with session_scope() as db:
+        r = collector.sync_account_history(db, bridge, tr.active_account(db))
+        assert r.get("inconsistent") == 1 and not r.get("corrected")
+        cp = db.scalar(select(ClosedPosition).where(ClosedPosition.ticket == ticket))
+        assert cp.sync_status == "INCONSISTENT" and (float(cp.profit), cp.r_multiple) == before
+        assert perf.load_trades(db, "DEMO") == []
+
+
 def test_metrics_are_correct_and_flag_small_samples():
     trades = [{"net": v, "r": v / 100, "closed_at": T0 + timedelta(days=i)} for i, v in enumerate([100, -50, 100, -50])]
     m = perf.compute_metrics(trades)

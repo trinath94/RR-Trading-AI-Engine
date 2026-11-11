@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.models import ClosedPosition, TradeOrder, TradingSignal, Symbol
 from app.db.models_intel import AIRecommendation, FailureReport, MissedOpportunity, ModelPrediction, TradeFeatures
 from app.learning_engine.memory import remember
+from app.learning_engine.performance import learnable
 from app.strategies import registry
 
 UTC = timezone.utc
@@ -94,7 +95,7 @@ def strategy_deterioration(db: Session, mode: str, codes: list[str], window: int
     out = {}
     for code in codes:
         rows = db.execute(select(ClosedPosition.profit, ClosedPosition.commission, ClosedPosition.swap)
-                          .where(ClosedPosition.mode == mode, ClosedPosition.strategy_codes.contains([code]))
+                          .where(ClosedPosition.mode == mode, ClosedPosition.strategy_codes.contains([code]), learnable())
                           .order_by(ClosedPosition.closed_at)).all()
         nets = [float(p) + float(c or 0) + float(s or 0) for p, c, s in rows]
         if len(nets) < 2 * window:
@@ -109,7 +110,7 @@ def strategy_deterioration(db: Session, mode: str, codes: list[str], window: int
 def run(db: Session, mode: str, bridge=None, limit: int = 200) -> dict:
     done = {cid for (cid,) in db.execute(select(FailureReport.closed_position_id))}
     q = (select(ClosedPosition, TradeFeatures).join(TradeFeatures, TradeFeatures.closed_position_id == ClosedPosition.id)
-         .where(TradeFeatures.mode == mode).order_by(ClosedPosition.closed_at.desc()).limit(limit * 2))
+         .where(TradeFeatures.mode == mode, learnable()).order_by(ClosedPosition.closed_at.desc()).limit(limit * 2))
     n = 0
     tally: dict[str, Counter] = defaultdict(Counter)
     for cp, tf in db.execute(q):

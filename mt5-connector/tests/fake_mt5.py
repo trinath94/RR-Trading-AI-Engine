@@ -132,8 +132,10 @@ class FakeMT5:
                                    magic=req["magic"], comment=req["comment"], time=int(time.time()), entry=0))
         elif req["action"] == TRADE_ACTION_DEAL:
             p = self.positions[req["position"]]
+            sgn = 1 if p["type"] == 0 else -1
+            pnl = round((req["price"] - p["price_open"]) * sgn * req["volume"] * self.symbols[p["symbol"]]["trade_contract_size"], 2)
             self.deals.append(dict(ticket=t + 100000, order=t, position_id=p["ticket"], symbol=p["symbol"],
-                                   type=req["type"], volume=req["volume"], price=req["price"], profit=12.5,
+                                   type=req["type"], volume=req["volume"], price=req["price"], profit=pnl,
                                    commission=-0.7, swap=0.0, magic=req["magic"], comment=req["comment"],
                                    time=int(time.time()), entry=1))
             p["volume"] = round(p["volume"] - req["volume"], 2)

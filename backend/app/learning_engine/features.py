@@ -13,6 +13,7 @@ from app.db.models import (AgentDecision, AnalysisResult, ClosedPosition, Symbol
                            TradingAccount, TradingSignal)
 from app.db.models_intel import TradeFeatures
 from app.execution.bridge import BridgeClient, BridgeError
+from app.learning_engine.performance import learnable
 
 log = logging.getLogger("learning.features")
 UTC = timezone.utc
@@ -123,7 +124,7 @@ def _enrich(db: Session, cp: ClosedPosition, bridge: BridgeClient | None = None)
 
 def enrich_pending(db: Session, bridge: BridgeClient | None, limit: int = 200) -> int:
     done = {cid for (cid,) in db.execute(select(TradeFeatures.closed_position_id))}
-    rows = db.scalars(select(ClosedPosition).order_by(ClosedPosition.closed_at.desc()).limit(limit * 3)).all()
+    rows = db.scalars(select(ClosedPosition).where(learnable()).order_by(ClosedPosition.closed_at.desc()).limit(limit * 3)).all()
     n = 0
     for cp in rows:
         if cp.id in done:

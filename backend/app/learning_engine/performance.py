@@ -16,6 +16,12 @@ from sqlalchemy.orm import Session
 from app.db.models import ClosedPosition
 from app.db.models_intel import PerformanceSnapshot, TradeFeatures
 
+
+def learnable():
+    """Positions whose MT5 deals reconcile. ``INCONSISTENT`` ones (see collector) never feed learning."""
+    return ClosedPosition.sync_status.is_distinct_from("INCONSISTENT")
+
+
 MIN_TRADES = 30
 UTC = timezone.utc
 
@@ -110,7 +116,8 @@ def compute_metrics(trades: list[dict]) -> dict:
 
 def load_trades(db: Session, mode: str) -> list[dict]:
     q = select(ClosedPosition, TradeFeatures).outerjoin(TradeFeatures, TradeFeatures.closed_position_id == ClosedPosition.id) \
-        .where((ClosedPosition.mode == mode) | ((ClosedPosition.mode.is_(None)) & (TradeFeatures.mode == mode)))
+        .where((ClosedPosition.mode == mode) | ((ClosedPosition.mode.is_(None)) & (TradeFeatures.mode == mode))) \
+        .where(learnable())
     out = []
     for cp, tf in db.execute(q):
         codes = sorted(cp.strategy_codes or [])

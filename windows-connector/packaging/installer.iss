@@ -169,8 +169,8 @@ begin
   if (CurPageID = wpReady) and (not MT5Found) and (not WizardSilent) then
     MsgBox('MetaTrader 5 was not found on this PC.' + #13#10#13#10 +
       'RR MT5 Connector needs the MetaTrader 5 terminal (64-bit). Install it from your broker or from ' +
-      'https://www.metatrader5.com, log in to your trading account, then start RR MT5 Connector and click CONNECT.' +
-      #13#10#13#10 + 'Installation of RR MT5 Connector can continue now.', mbInformation, MB_OK);
+      'https://www.metatrader5.com, log in to your trading account, then start RR MT5 Connector and click CONNECT.' + #13#10#13#10 +
+      'Installation of RR MT5 Connector can continue now.', mbInformation, MB_OK);
 end;
 
 function HasEngineDetails: Boolean;

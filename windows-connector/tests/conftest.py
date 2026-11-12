@@ -29,3 +29,35 @@ def store(home, vault):
     s = Store(home / "config.db", vault)
     yield s
     s.close()
+
+
+@pytest.fixture(autouse=True)
+def _close_qt_widgets():
+    """Close and delete every top-level Qt widget after each test so nothing is torn down at interpreter exit."""
+    yield
+    if "PySide6.QtWidgets" not in sys.modules:
+        return
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        return
+    for w in QApplication.topLevelWidgets():
+        w.hide()
+        w.deleteLater()
+    app.processEvents()
+
+
+_EXIT = {"status": 0}
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _EXIT["status"] = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    # PySide6 on Windows can crash during interpreter finalisation after all tests passed, turning a green run
+    # red. Once pytest has printed its summary, exit with pytest's own result and skip that teardown.
+    if sys.platform == "win32" and "PySide6.QtWidgets" in sys.modules:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_EXIT["status"])

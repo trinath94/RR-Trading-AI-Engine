@@ -7,6 +7,8 @@ name: windows-connector
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "**"                    # needed: listing only tags would stop branch pushes from triggering
     tags:
       - "connector-v*"          # pushing a tag builds, tests and publishes a GitHub Release
     paths:

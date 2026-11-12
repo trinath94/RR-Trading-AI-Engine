@@ -55,9 +55,18 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_unconfigure(config):
-    # PySide6 on Windows can crash during interpreter finalisation after all tests passed, turning a green run
-    # red. Once pytest has printed its summary, exit with pytest's own result and skip that teardown.
+    # PySide6 on Windows can crash in Qt's DLL-unload handlers after every test passed, turning a green run red
+    # (os._exit still runs them). Delete the QApplication explicitly, then end the process with pytest's own
+    # result via TerminateProcess, which skips DLL detach.
     if sys.platform == "win32" and "PySide6.QtWidgets" in sys.modules:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            import shiboken6
+            app.processEvents()
+            shiboken6.delete(app)
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(_EXIT["status"])
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.TerminateProcess(k32.GetCurrentProcess(), _EXIT["status"])

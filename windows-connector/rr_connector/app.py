@@ -206,4 +206,12 @@ def main(argv=None) -> int:
         SetupWizard(manager, window).exec()
     rc = app.exec()
     manager.stop()
+    # release Qt objects in a defined order before interpreter shutdown (avoids crashes in Qt's DLL unload)
+    import shiboken6
+    for w in QApplication.topLevelWidgets():
+        w.deleteLater()
+    app.processEvents()
+    tray.deleteLater()
+    app.processEvents()
+    shiboken6.delete(app)
     return rc

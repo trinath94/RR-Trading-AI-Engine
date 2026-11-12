@@ -1,6 +1,7 @@
 "use client";
 import { Send } from "lucide-react";
 import { useState } from "react";
+import AgentsPanel from "@/components/Agents";
 import ControlCenter from "@/components/ControlCenter";
 import { can, PageTitle, useMe } from "@/components/Shell";
 import { Badge, Btn, Confirm, ErrorLine, Field, inputCls, Panel, Table } from "@/components/ui";
@@ -61,6 +62,7 @@ export default function Terminal() {
         </Panel>
         <ControlCenter />
       </div>
+      <AgentsPanel />
       <Panel title="Broker instruments" className="mt-3">
         <Table rows={syms} empty="No symbols discovered"
           cols={[{ k: "symbol", h: "Broker symbol" }, { k: "canonical", h: "Canonical" }, { k: "category", h: "Class" }, { k: "digits", h: "Digits" },

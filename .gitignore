@@ -15,3 +15,8 @@ nginx/certs/
 nginx/acme/
 frontend/next-env.d.ts.bak
 *.tsbuildinfo
+# RR MT5 Connector build outputs
+windows-connector/build/
+windows-connector/dist/
+windows-connector/.venv/
+windows-connector/packaging/version_info.txt

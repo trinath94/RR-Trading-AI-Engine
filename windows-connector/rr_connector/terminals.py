@@ -10,6 +10,7 @@ Every source is injectable so the logic is unit-tested on any OS.
 """
 from __future__ import annotations
 
+import ntpath  # Windows path semantics on every OS (deterministic tests)
 import os
 import sys
 from dataclasses import asdict, dataclass, field
@@ -42,7 +43,7 @@ class Terminal:
 
 
 def _norm(p: str) -> str:
-    return os.path.normcase(os.path.normpath(p.strip().strip('"')))
+    return ntpath.normcase(ntpath.normpath(p.strip().strip('"')))
 
 
 # ---- source readers (Windows implementations) --------------------------------------------------
@@ -139,13 +140,13 @@ def find_terminals(registry: Callable[[], list[dict]] = registry_entries,
     def add(folder: str, source: str, name: str = "", version: str = "") -> Terminal | None:
         if not folder:
             return None
-        exe = os.path.join(folder.strip().strip('"'), EXE)
+        exe = ntpath.join(folder.strip().strip('"'), EXE)
         if not exists(exe):
             return None
         key = _norm(folder)
         t = found.get(key)
         if t is None:
-            t = found[key] = Terminal(folder=os.path.normpath(folder.strip().strip('"')), exe=os.path.normpath(exe))
+            t = found[key] = Terminal(folder=ntpath.normpath(folder.strip().strip('"')), exe=ntpath.normpath(exe))
         if source not in t.sources:
             t.sources.append(source)
         if name and t.name == "MetaTrader 5":
@@ -160,7 +161,7 @@ def find_terminals(registry: Callable[[], list[dict]] = registry_entries,
             continue
         folder = e.get("InstallLocation") or ""
         if not folder and e.get("DisplayIcon"):
-            folder = os.path.dirname(e["DisplayIcon"].split(",")[0].strip('"'))
+            folder = ntpath.dirname(e["DisplayIcon"].split(",")[0].strip('"'))
         add(folder, "registry", e.get("DisplayName", ""), e.get("DisplayVersion", ""))
     for root in roots():
         try:
@@ -171,7 +172,7 @@ def find_terminals(registry: Callable[[], list[dict]] = registry_entries,
     for folder in origins():
         add(folder, "appdata")
     for p in processes():
-        t = add(os.path.dirname(p["exe"]), "process")
+        t = add(ntpath.dirname(p["exe"]), "process")
         if t:
             t.running, t.pid = True, p["pid"]
     for t in found.values():

@@ -2,7 +2,7 @@
 
 OpenAPI is served at `/api/docs` outside production. All routes except `/api/health`, `/api/auth/login` and `/api/auth/password-reset/confirm` require the session cookie; non-GET routes also require `X-CSRF-Token`.
 
-Part 25/26 added the `/api/learning/*` and `/api/intelligence/*` groups; all earlier routes are unchanged.
+Part 25/26 added the `/api/learning/*` and `/api/intelligence/*` groups. The RR MT5 Connector added `/api/v1/mt5/*` (agent routes authenticate with the agent's Ed25519 signature instead of a session — see docs/WINDOWS_CONNECTOR.md). All earlier routes are unchanged.
 
 | Method | Path |
 |---|---|
@@ -111,4 +111,12 @@ Part 25/26 added the `/api/learning/*` and `/api/intelligence/*` groups; all ear
 | GET | `/api/users/login-history` |
 | PATCH | `/api/users/{user_id}` |
 | POST | `/api/users/{user_id}/reset-token` |
-| WEBSOCKET | `/api/ws` |
+| POST | `/api/v1/mt5/agent/register` |
+| POST | `/api/v1/mt5/agent/tokens` |
+| GET | `/api/v1/mt5/agent/update` |
+| WS | `/api/v1/mt5/agent/ws` |
+| GET | `/api/v1/mt5/agents` |
+| POST | `/api/v1/mt5/agents/{agent_id}/revoke` |
+| POST | `/api/v1/mt5/heartbeat` |
+| GET | `/api/v1/mt5/status` |
+| WS | `/api/ws` |

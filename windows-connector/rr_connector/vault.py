@@ -22,7 +22,7 @@ def _default_backend() -> KeyringBackend | None:
 
 
 class Vault:
-    def __init__(self, backend: KeyringBackend | None = None):
+    def __init__(self, backend=None):
         self.backend = backend or _default_backend() or keyring.get_keyring()
 
     def get(self, name: str) -> str | None:
@@ -38,12 +38,11 @@ class Vault:
             pass
 
 
-class MemoryKeyring(KeyringBackend):
-    """In-memory backend for tests (never used by the application)."""
-    priority = 0
+class MemoryKeyring:
+    """In-memory store for tests. Deliberately NOT a ``KeyringBackend`` subclass, so keyring's automatic
+    backend discovery can never select it in the application."""
 
     def __init__(self):
-        super().__init__()
         self.store: dict[tuple[str, str], str] = {}
 
     def get_password(self, service, username):

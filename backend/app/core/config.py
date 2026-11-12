@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     bridge_ca_bundle: str | None = None  # path to CA bundle / self-signed cert
     bridge_timeout_seconds: float = 10.0
     bridge_heartbeat_seconds: int = 5
+    # "direct": the engine calls the connector over HTTPS (original mode, inbound port on Windows).
+    # "relay": the RR MT5 Connector desktop agent dials out over a WebSocket and the same signed requests
+    # are relayed to it (no inbound port on Windows). Default keeps the original behaviour.
+    bridge_mode: str = "direct"
+    agent_heartbeat_timeout_seconds: int = 30
+    agent_token_ttl_hours: int = 24
+    agent_latest_version: str = ""        # published desktop connector version (update mechanism)
+    agent_update_url: str = ""            # HTTPS URL of RR_MT5_Connector_Setup.exe
+    agent_update_sha256: str = ""         # SHA-256 of that installer; the agent refuses a mismatching file
 
     # Scanner
     scan_interval_seconds: int = 60

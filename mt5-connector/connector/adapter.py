@@ -35,6 +35,15 @@ class MT5Adapter:
                 kwargs["path"] = path
             return bool(self.mt5.initialize(**kwargs))
 
+    def attach(self, path: str | None = None, timeout_ms: int = 60_000) -> bool:
+        """Attach to a terminal that is already running and logged in (desktop connector).
+        No credentials are passed: the terminal's own authorised session is used."""
+        with self.lock:
+            kwargs: dict = {"timeout": timeout_ms}
+            if path:
+                kwargs["path"] = path
+            return bool(self.mt5.initialize(**kwargs))
+
     def shutdown(self) -> None:
         with self.lock:
             self.mt5.shutdown()

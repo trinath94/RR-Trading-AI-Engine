@@ -44,10 +44,17 @@ class BridgeConfig:
     secret: str
     ca_bundle: str | None = None
     timeout: float = 10.0
+    relay_agent_id: int | None = None   # set in relay mode (RR MT5 Connector desktop agent)
 
     @classmethod
     def from_settings(cls) -> "BridgeConfig":
         s = get_settings()
+        if s.bridge_mode == "relay":
+            from app.execution import relay
+            agent = relay.resolve_agent()
+            if agent is None:
+                raise BridgeError("no RR MT5 Connector agent is registered (RR_BRIDGE_MODE=relay)")
+            return cls("http://rr-mt5-agent", agent.secret, None, s.bridge_timeout_seconds, relay_agent_id=agent.id)
         return cls(s.bridge_url.rstrip("/"), s.bridge_shared_secret, s.bridge_ca_bundle, s.bridge_timeout_seconds)
 
 
@@ -57,6 +64,9 @@ class BridgeClient:
         if not self.cfg.secret:
             raise BridgeError("RR_BRIDGE_SHARED_SECRET is not configured")
         verify: Any = self.cfg.ca_bundle or True
+        if transport is None and self.cfg.relay_agent_id is not None:
+            from app.execution.relay import RelayTransport
+            transport = RelayTransport(self.cfg.relay_agent_id, self.cfg.timeout)
         self._http = httpx.Client(base_url=self.cfg.base_url, timeout=self.cfg.timeout, verify=verify,
                                   transport=transport)
 

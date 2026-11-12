@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import auth, intel, learning, system, trading
+from app.api.routes import auth, intel, learning, mt5_agent, system, trading
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -37,5 +37,6 @@ async def unhandled(request: Request, exc: Exception):
     return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
 
-for r in (auth.router, auth.users, trading.router, intel.router, system.router, learning.learning, learning.intel):
+for r in (auth.router, auth.users, trading.router, intel.router, system.router, learning.learning, learning.intel,
+          mt5_agent.router):
     app.include_router(r)

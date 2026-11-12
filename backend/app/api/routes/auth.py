@@ -66,6 +66,7 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
     db.add(UserSession(id=sid, user_id=user.id, csrf_hash=sha256(csrf), expires_at=exp, ip=ip, user_agent=ua))
     db.add(LoginHistory(user_id=user.id, username=user.username, success=True, ip=ip, user_agent=ua))
     audit(db, user.id, "LOGIN", user.username, ip=ip)
+    db.commit()   # commit before the response: the session must exist when the client's next request arrives
     secure = s.cookie_secure
     response.set_cookie(SESSION_COOKIE, token, httponly=True, secure=secure, samesite="strict",
                         max_age=s.session_minutes * 60, path="/")

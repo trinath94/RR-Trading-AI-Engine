@@ -51,7 +51,9 @@ TRANSIENT = ["login_history", "user_sessions", "audit_logs", "notifications", "s
              "regime_history", "model_predictions", "model_registry", "consensus_decisions", "anomaly_events",
              "portfolio_snapshots", "failure_reports", "missed_opportunities", "position_adjustments",
              "strategy_fingerprints", "drift_events", "ai_recommendations", "approval_records", "learning_jobs",
-             "strategy_experiments"]
+             "strategy_experiments",
+             # RR MT5 Connector desktop agents
+             "mt5_agent_tokens", "mt5_agents"]
 
 
 @pytest.fixture

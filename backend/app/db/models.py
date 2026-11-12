@@ -600,3 +600,4 @@ class StrategyExperiment(TimestampMixin, Base):
 
 
 from app.db import models_intel  # noqa: E402,F401  (Part 25/26 additive tables)
+from app.db import models_agent  # noqa: E402,F401  (RR MT5 Connector agents, migration 0003)

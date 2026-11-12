@@ -55,7 +55,12 @@ class FakeMT5:
                 setattr(self, k, globals()[k])
 
     # lifecycle
+    logged_in = True          # desktop-connector tests: the terminal's own session
+    trade_mode = 0            # 0 DEMO, 1 CONTEST, 2 REAL
+
     def initialize(self, **kw):
+        if "login" not in kw:     # attach to the running, already-authorised terminal
+            return self.connected and self.logged_in
         return kw.get("login") == self.login
 
     def shutdown(self):
@@ -68,8 +73,10 @@ class FakeMT5:
         return Terminal(self.connected, True, 4755, 12000)
 
     def account_info(self):
+        if not self.logged_in:
+            return None
         eq = self.balance + sum(p["profit"] for p in self.positions.values())
-        return Account(self.login, self.server, "USD", self.balance, eq, 0.0, eq, 0.0, 100, True, 0, "Fake", "Test")
+        return Account(self.login, self.server, "USD", self.balance, eq, 0.0, eq, 0.0, 100, True, self.trade_mode, "Fake", "Test")
 
     def _sym(self, name):
         s = self.symbols[name]

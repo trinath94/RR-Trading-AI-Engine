@@ -42,7 +42,10 @@ jobs:
         run: python -m pytest -q tests
 
       - name: Original connector tests
-        run: python -m pytest -q ..\mt5-connector\tests
+        run: |
+          # these tests sign requests with the engine's own signer (backend/app/core/security.py)
+          python -m pip install "PyJWT>=2.9" "argon2-cffi>=23.1" "pydantic>=2.8" "pydantic-settings>=2.4"
+          python -m pytest -q ..\mt5-connector\tests
 
       - name: Icon and version resource
         run: |

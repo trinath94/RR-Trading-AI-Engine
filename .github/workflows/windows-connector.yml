@@ -7,13 +7,15 @@ name: windows-connector
 on:
   workflow_dispatch:
   push:
+    tags:
+      - "connector-v*"          # pushing a tag builds, tests and publishes a GitHub Release
     paths:
       - "windows-connector/**"
       - "mt5-connector/**"
       - ".github/workflows/windows-connector.yml"
 
 permissions:
-  contents: read
+  contents: write               # only used by the release step (tag pushes)
 
 jobs:
   build:
@@ -104,3 +106,16 @@ jobs:
             windows-connector/dist/selftest.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Publish GitHub Release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/connector-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -ne "connector-v$env:VERSION") { throw "tag $tag does not match app version $env:VERSION" }
+          gh release create $tag `
+            dist\RR_MT5_Connector_Setup.exe dist\SHA256SUMS.txt dist\selftest.json `
+            --repo "${{ github.repository }}" `
+            --title "RR MT5 Connector $env:VERSION" `
+            --notes-file RELEASE_NOTES.md

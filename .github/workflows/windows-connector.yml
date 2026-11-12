@@ -76,15 +76,24 @@ jobs:
           Get-Content dist\SHA256SUMS.txt
 
       - name: Silent install / uninstall smoke test
+        timeout-minutes: 10
         run: |
-          $p = Start-Process dist\RR_MT5_Connector_Setup.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=""""" -Wait -PassThru
+          # wait for the installer process only: the silent install starts the connector in the tray, and
+          # Start-Process -Wait would also wait for that child
+          $p = Start-Process dist\RR_MT5_Connector_Setup.exe -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=""' -PassThru
+          $p.WaitForExit()
           if ($p.ExitCode -ne 0) { throw "silent install failed ($($p.ExitCode))" }
           $exe = "$env:ProgramFiles\RR MT5 Connector\RR_MT5_Connector.exe"
           if (-not (Test-Path $exe)) { throw "not installed at $exe" }
-          Start-Sleep -Seconds 3
+          Start-Sleep -Seconds 5
+          $running = Get-Process -Name RR_MT5_Connector -ErrorAction SilentlyContinue
+          "connector running after install: $([bool]$running)"
           Stop-Process -Name RR_MT5_Connector -Force -ErrorAction SilentlyContinue
-          $p = Start-Process "$env:ProgramFiles\RR MT5 Connector\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "silent uninstall failed ($($p.ExitCode))" }
+          $u = Start-Process "$env:ProgramFiles\RR MT5 Connector\unins000.exe" -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -PassThru
+          $u.WaitForExit()
+          if ($u.ExitCode -ne 0) { throw "silent uninstall failed ($($u.ExitCode))" }
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw "uninstall left $exe behind" }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -94,3 +103,4 @@ jobs:
             windows-connector/dist/SHA256SUMS.txt
             windows-connector/dist/selftest.json
           if-no-files-found: error
+          retention-days: 90

@@ -268,7 +268,9 @@ def main() -> None:
         log.error("another learner holds the lock; exiting")
         return
     stop = {"flag": False}
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(flag=True))
+    for sig in ("SIGTERM", "SIGINT", "SIGBREAK"):   # SIGINT/SIGBREAK: Windows service stop (Ctrl+C / Ctrl+Break)
+        if hasattr(signal, sig):
+            signal.signal(getattr(signal, sig), lambda *_: stop.update(flag=True))
     with session_scope() as db:
         from app.strategies.experimental import lifecycle
         log.info("experimental library: %s", lifecycle.register_library(db))

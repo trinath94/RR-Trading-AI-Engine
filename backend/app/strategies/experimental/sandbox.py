@@ -28,11 +28,14 @@ def run_job(task: str, source: str, bars: pd.DataFrame | None = None, timeout: i
             path = os.path.join(tmp, "bars.pkl")
             bars.to_pickle(path)
             job["bars"] = path
-        env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": BACKEND_ROOT, "PYTHONHASHSEED": "0", "HOME": tmp,
-               "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
+        env = _scrubbed_env(tmp)
+        flags = 0
+        if sys.platform == "win32":     # no console window; below-normal priority so trading work stays ahead
+            flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS
         try:
             proc = subprocess.run([sys.executable, "-m", "app.strategies.experimental.runner"], input=json.dumps(job),
-                                  capture_output=True, text=True, timeout=timeout, cwd=tmp, env=env)
+                                  capture_output=True, text=True, timeout=timeout, cwd=tmp, env=env,
+                                  creationflags=flags)
         except subprocess.TimeoutExpired as exc:
             raise SandboxError(f"sandbox timed out after {timeout}s") from exc
         lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("{")]
@@ -42,6 +45,20 @@ def run_job(task: str, source: str, bars: pd.DataFrame | None = None, timeout: i
         if not out.get("ok"):
             raise SandboxError(out.get("error", "unknown sandbox error"))
         return _finite(out["result"])
+
+
+def _scrubbed_env(tmp: str) -> dict:
+    """Minimal environment for the sandbox: no secrets (no RR_* settings, API keys, DB/Redis URLs)."""
+    env = {"PYTHONPATH": BACKEND_ROOT, "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1",
+           "MKL_NUM_THREADS": "1"}
+    if sys.platform == "win32":
+        root = os.environ.get("SYSTEMROOT", r"C:\Windows")
+        # Python on Windows needs SYSTEMROOT; PATH only to the interpreter's own DLLs and System32
+        env.update({"SYSTEMROOT": root, "PATH": os.pathsep.join([os.path.dirname(sys.executable), os.path.join(root, "System32")]),
+                    "TEMP": tmp, "TMP": tmp, "USERPROFILE": tmp})
+    else:
+        env.update({"PATH": "/usr/bin:/bin", "HOME": tmp})
+    return env
 
 
 def _finite(x):

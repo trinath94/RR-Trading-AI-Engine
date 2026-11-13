@@ -4,7 +4,8 @@ Reads a JSON job from stdin: {"task": "unit"|"validate"|"evaluate", "source": st
 "params": {...}, "costs": {...}} and writes a JSON result to stdout.
 
 Isolation inside the subprocess (defence in depth, on top of the parent's static analysis):
-* POSIX resource limits: CPU seconds, address space, open files, file size, no core dumps.
+* OS limits: POSIX ``setrlimit`` (CPU seconds, address space, open files, file size, no core dumps) on Linux;
+  on Windows a Job Object (CPU time, committed memory, no child processes, killed with its handle, no error UI).
 * The experimental source is exec'd with a restricted ``__builtins__`` and an import hook that only
   allows math/numpy/pandas/statistics. The sandbox API (Strategy, StrategySignal, candle, indicators,
   structure) is injected as plain names.
@@ -14,17 +15,67 @@ from __future__ import annotations
 
 import builtins
 import json
-import resource
 import sys
 import traceback
 
 
 def _limits(cpu: int, mem_mb: int) -> None:
+    if sys.platform == "win32":
+        _windows_job(cpu, mem_mb)
+        return
+    import resource
     resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 5))
     resource.setrlimit(resource.RLIMIT_AS, (mem_mb * 1024 * 1024, mem_mb * 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def _windows_job(cpu: int, mem_mb: int) -> None:
+    """Put this process in a Job Object before any untrusted code runs. A process cannot leave its job, so the
+    limits hold for the experimental code: CPU time, committed memory, no child processes, and the job is killed
+    if its handle closes (parent gone). Raises if the job cannot be applied (fail closed)."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_ulonglong) for n in ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                                                      "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+    class BASIC(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+                    ("LimitFlags", w.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", w.DWORD),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", w.DWORD), ("SchedulingClass", w.DWORD)]
+
+    class EXTENDED(ctypes.Structure):
+        _fields_ = [("BasicLimitInformation", BASIC), ("IoInfo", IO_COUNTERS),
+                    ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    LIMIT_PROCESS_TIME, LIMIT_ACTIVE_PROCESS, LIMIT_PROCESS_MEMORY = 0x2, 0x8, 0x100
+    LIMIT_DIE_ON_UNHANDLED_EXCEPTION, LIMIT_KILL_ON_JOB_CLOSE = 0x400, 0x2000
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateJobObjectW.restype = w.HANDLE
+    k32.GetCurrentProcess.restype = w.HANDLE
+    job = k32.CreateJobObjectW(None, None)
+    if not job:
+        raise OSError(ctypes.get_last_error(), "CreateJobObject failed")
+    info = EXTENDED()
+    b = info.BasicLimitInformation
+    b.LimitFlags = (LIMIT_PROCESS_TIME | LIMIT_ACTIVE_PROCESS | LIMIT_PROCESS_MEMORY
+                    | LIMIT_DIE_ON_UNHANDLED_EXCEPTION | LIMIT_KILL_ON_JOB_CLOSE)
+    b.PerProcessUserTimeLimit = int(cpu) * 10_000_000          # 100 ns units
+    b.ActiveProcessLimit = 1
+    info.ProcessMemoryLimit = int(mem_mb) * 1024 * 1024
+    if not k32.SetInformationJobObject(w.HANDLE(job), 9, ctypes.byref(info), ctypes.sizeof(info)):
+        raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
+    if not k32.AssignProcessToJobObject(w.HANDLE(job), k32.GetCurrentProcess()):
+        raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
+    _JOB_HANDLE.append(job)                                      # keep the handle open for the process lifetime
+
+
+_JOB_HANDLE: list = []
 
 
 ALLOWED = {"math", "numpy", "pandas", "statistics"}

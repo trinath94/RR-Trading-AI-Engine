@@ -47,6 +47,20 @@ def test_runtime_import_guard_and_resource_limits():
         sandbox.run_job("unit", hog, timeout=20, cpu_seconds=3)
 
 
+def test_sandbox_memory_limit_and_secret_free_environment(monkeypatch):
+    """The OS limit (setrlimit on Linux, Job Object on Windows) stops a memory hog; no secrets reach the child."""
+    hog = ("class MemHog(Strategy):\n    code, name, category = 'exp_memhog', 'm', 'experimental'\n    min_bars = 10\n"
+           "    def detect(self, ctx):\n        x = [1.0] * (400 * 1024 * 1024)\n        return []\n")
+    try:
+        res = sandbox.run_job("unit", hog, timeout=60, memory_mb=256)
+        assert not res["passed"]                       # MemoryError surfaced as a failed strategy
+    except sandbox.SandboxError:
+        pass                                           # or the process was stopped by the OS limit
+    monkeypatch.setenv("RR_ANTHROPIC_API_KEY", "sk-should-not-leak")
+    env = sandbox._scrubbed_env("tmpdir")
+    assert not any(k.startswith("RR_") for k in env) and "sk-should-not-leak" not in str(env)
+
+
 def test_experimental_code_never_reaches_production_registry():
     before = set(registry.all_strategies())
     sandbox.run_job("unit", GOOD)

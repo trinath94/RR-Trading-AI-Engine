@@ -175,7 +175,9 @@ def main() -> None:
         log.error("another worker holds the trading lock; exiting")
         return
     stop = {"flag": False}
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(flag=True))
+    for sig in ("SIGTERM", "SIGINT", "SIGBREAK"):   # SIGINT/SIGBREAK: Windows service stop (Ctrl+C / Ctrl+Break)
+        if hasattr(signal, sig):
+            signal.signal(getattr(signal, sig), lambda *_: stop.update(flag=True))
     bridge = BridgeClient()
     agent = None
     if s.anthropic_api_key:

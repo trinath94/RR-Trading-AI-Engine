@@ -126,6 +126,17 @@ jobs:
           if (-not (Get-ChildItem "$env:DATA_ROOT\backups\*.rrbak")) { throw "backups were removed" }
           "uninstalled; database and backups kept"
 
+      - name: Print diagnostics on failure
+        if: failure()
+        run: |
+          Get-Service RRTradingOne-* -ErrorAction SilentlyContinue | Format-Table Name, Status, StartType -AutoSize | Out-String | Write-Host
+          foreach ($n in @("RRTradingOne-API", "RRTradingOne-Learner")) { & sc.exe qc $n; & sc.exe queryex $n }
+          Get-ChildItem "C:\ProgramData\RR Trading One\logs" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+            "===== $($_.FullName) ($($_.Length) bytes)"
+            Get-Content $_.FullName -Tail 60 -ErrorAction SilentlyContinue }
+          Get-WinEvent -LogName System -MaxEvents 40 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match "Service Control" } |
+            Format-List TimeCreated, Message | Out-String | Write-Host
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

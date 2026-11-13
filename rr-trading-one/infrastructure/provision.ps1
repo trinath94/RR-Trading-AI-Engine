@@ -87,9 +87,9 @@ Step "Folders and permissions"
 foreach ($d in @($InstallRoot, $Infra, $Svc, $DataRoot, $Dl, $Secrets, $Logs, (Join-Path $DataRoot "data"),
                  (Join-Path $DataRoot "backups"), (Join-Path $DataRoot "models"), (Join-Path $DataRoot "cache"),
                  $RedisData)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
-# secrets and backups: no inheritance, SYSTEM + Administrators only (service accounts get file-level read below)
-Protect-Folder $Secrets
-Protect-Folder (Join-Path $DataRoot "backups")
+# All user data: no inheritance, SYSTEM + Administrators only. Each service account is then granted only
+# what it needs (PostgreSQL: its data dir; Redis: its data dir; engine services: engine.env read, logs/cache/models).
+Protect-Folder $DataRoot
 
 # ---------------------------------------------------------------------------------------------------
 Step "Components (pinned, verified)"
@@ -108,9 +108,18 @@ if (-not $vc -or $vc.Installed -ne 1) {
 # ---------------------------------------------------------------------------------------------------
 Step "Python $($C.python.version)"
 if (-not (Test-Path $Py)) {
-    Invoke-Installer $files.python @("/quiet", "InstallAllUsers=1", "TargetDir=$(Join-Path $Infra 'python')", "PrependPath=0",
-        "Include_launcher=0", "Include_test=0", "Include_doc=0", "Include_tcltk=0", "Shortcuts=0", "AssociateFiles=0")
+    # Official python.org NuGet package (plain zip): private copy, no registry entries, no clash with other Pythons
+    $zip = Join-Path $Dl "python-$($C.python.version).zip"
+    Copy-Item $files.python $zip -Force                       # Expand-Archive only accepts .zip on PowerShell 5.1
+    $stage = Join-Path $Dl "python-stage"
+    Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+    Expand-Archive $zip -DestinationPath $stage -Force
+    Copy-Item -Recurse -Force (Join-Path $stage "tools") (Join-Path $Infra "python")
+    Remove-Item -Recurse -Force $stage, $zip
 }
+$sig = Get-AuthenticodeSignature $Py
+if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "Python Software Foundation") { throw "python.exe signature check failed ($($sig.Status))" }
+Info "python.exe signed by Python Software Foundation"
 Invoke-Checked $Py @("--version")
 
 Step "Application files"
@@ -214,17 +223,15 @@ dir "$($RedisData -replace '\\','/')"
 appendonly yes
 maxmemory 512mb
 maxmemory-policy noeviction
-logfile "$((Join-Path $Logs 'redis.log') -replace '\\','/')"
 "@
 $redisSvc = "RRTradingOne-Redis"
-if (-not (Get-Service $redisSvc -ErrorAction SilentlyContinue)) {
-    Invoke-Checked (Join-Path $RedisDir "redis-server.exe") @("--service-install", $redisConf, "--service-name", $redisSvc)
-}
-Invoke-Checked "sc.exe" @("config", $redisSvc, "obj=", "NT AUTHORITY\LocalService", "start=", "auto")
+Install-WinSWService -WinSW $files.winsw -Dir $Svc -Id $redisSvc -Name "RR Trading One - Redis" `
+    -Executable (Join-Path $RedisDir "redis-server.exe") -Arguments "`"$redisConf`"" -WorkingDir $RedisData `
+    -StartMode "Automatic" -Account "NT AUTHORITY\LocalService" -Logs $Logs
 Grant-Path $RedisData "*S-1-5-19" "(OI)(CI)M"
-Grant-Path $redisConf "*S-1-5-19" "R"
 Grant-Path $Logs "*S-1-5-19" "(OI)(CI)M"
-Restart-Service $redisSvc
+Grant-Path $InstallRoot "*S-1-5-19" "(OI)(CI)RX"
+Restart-Service $redisSvc -Force
 Wait-Until "Redis ready" { (Test-NetConnection 127.0.0.1 -Port $RedisPort -WarningAction SilentlyContinue).TcpTestSucceeded } 60
 
 # ---------------------------------------------------------------------------------------------------

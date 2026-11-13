@@ -15,9 +15,10 @@ foreach ($id in @("RRTradingOne-Worker", "RRTradingOne-Learner", "RRTradingOne-A
     $exe = Join-Path $InstallRoot "infrastructure\services\$id.exe"
     if ((Get-Service $id -ErrorAction SilentlyContinue) -and (Test-Path $exe)) { Invoke-Checked $exe @("uninstall") | Out-Null; Info "$id removed" }
 }
-if (Get-Service "RRTradingOne-Redis" -ErrorAction SilentlyContinue) {
+$redisExe = Join-Path $InstallRoot "infrastructure\services\RRTradingOne-Redis.exe"
+if ((Get-Service "RRTradingOne-Redis" -ErrorAction SilentlyContinue) -and (Test-Path $redisExe)) {
     Stop-Service "RRTradingOne-Redis" -Force
-    Invoke-Checked (Join-Path $InstallRoot "infrastructure\redis\redis-server.exe") @("--service-uninstall", "--service-name", "RRTradingOne-Redis")
+    Invoke-Checked $redisExe @("uninstall") | Out-Null; Info "RRTradingOne-Redis removed"
 }
 if (Get-Service "RRTradingOne-PostgreSQL" -ErrorAction SilentlyContinue) {
     Stop-Service "RRTradingOne-PostgreSQL" -Force

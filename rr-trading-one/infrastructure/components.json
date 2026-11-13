@@ -8,9 +8,9 @@
   },
   "python": {
     "version": "3.12.10",
-    "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe",
-    "sha256": "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb",
-    "signer": "Python Software Foundation"
+    "url": "https://api.nuget.org/v3-flatcontainer/python/3.12.10/python.3.12.10.nupkg",
+    "sha256": "0eb85c2dfccccf1b17352de4c397f69194035b7d37149eacc16f1147d93de3b8",
+    "_note": "Official python.org NuGet distribution: a private, registry-free Python that cannot collide with other installed Pythons."
   },
   "postgresql": {
     "version": "16.9",

@@ -142,30 +142,24 @@ function Invoke-Engine([string]$python, [string[]]$arguments, [string]$backend, 
     return $out
 }
 
-function Install-EngineService {
-    param([string]$WinSW, [string]$Dir, [string]$Id, [string]$Name, [string]$StartMode, [string]$Arguments,
-          [string]$Python, [string]$Backend, [string]$EnvFile, [string]$Logs, [string]$PgBin, [string]$Cache)
-    $tmp = Join-Path $Cache "tmp\$Id"
-    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+function Install-WinSWService {
+    param([string]$WinSW, [string]$Dir, [string]$Id, [string]$Name, [string]$Executable, [string]$Arguments,
+          [string]$WorkingDir, [string]$StartMode, [string]$Account, [string]$Logs, [string[]]$Depends = @(),
+          [hashtable]$Environment = @{})
     $exe = Join-Path $Dir "$Id.exe"
     Copy-Item $WinSW $exe -Force
+    $envXml = ($Environment.Keys | Sort-Object | ForEach-Object { "  <env name=`"$_`" value=`"$([Security.SecurityElement]::Escape($Environment[$_]))`"/>" }) -join "`r`n"
+    $depXml = ($Depends | ForEach-Object { "  <depend>$_</depend>" }) -join "`r`n"
     $xml = @"
 <service>
   <id>$Id</id>
   <name>$Name</name>
-  <description>$Name (RR Trading One). Managed by RR Trading One; see C:\ProgramData\RR Trading One\logs.</description>
-  <executable>$Python</executable>
-  <arguments>$Arguments</arguments>
-  <workingdirectory>$Backend</workingdirectory>
-  <env name="PYTHONPATH" value="$Backend"/>
-  <env name="RR_ENV_FILE" value="$EnvFile"/>
-  <env name="RR_PG_BIN" value="$PgBin"/>
-  <env name="PYTHONUTF8" value="1"/>
-  <env name="PYTHONDONTWRITEBYTECODE" value="1"/>
-  <env name="TEMP" value="$tmp"/>
-  <env name="TMP" value="$tmp"/>
-  <depend>RRTradingOne-PostgreSQL</depend>
-  <depend>RRTradingOne-Redis</depend>
+  <description>$Name (RR Trading One). Logs: $([Security.SecurityElement]::Escape($Logs))</description>
+  <executable>$([Security.SecurityElement]::Escape($Executable))</executable>
+  <arguments>$([Security.SecurityElement]::Escape($Arguments))</arguments>
+  <workingdirectory>$([Security.SecurityElement]::Escape($WorkingDir))</workingdirectory>
+$envXml
+$depXml
   <startmode>$StartMode</startmode>
   <delayedAutoStart>$(if ($StartMode -eq 'Automatic') { 'true' } else { 'false' })</delayedAutoStart>
   <onfailure action="restart" delay="10 sec"/>
@@ -173,15 +167,27 @@ function Install-EngineService {
   <onfailure action="none"/>
   <resetfailure>1 hour</resetfailure>
   <stoptimeout>30 sec</stoptimeout>
-  <logpath>$Logs</logpath>
+  <logpath>$([Security.SecurityElement]::Escape($Logs))</logpath>
   <log mode="roll-by-size"><sizeThreshold>10240</sizeThreshold><keepFiles>8</keepFiles></log>
 </service>
 "@
     [IO.File]::WriteAllText((Join-Path $Dir "$Id.xml"), $xml, (New-Object Text.UTF8Encoding($false)))
     if (-not (Get-Service $Id -ErrorAction SilentlyContinue)) { Invoke-Checked $exe @("install") | Out-Null }
     Set-Service $Id -StartupType $StartMode
-    Set-ServiceAccount $Id "NT SERVICE\$Id"
+    Set-ServiceAccount $Id $Account
+    Info "$Id installed ($StartMode, runs as $Account)"
+}
+
+function Install-EngineService {
+    param([string]$WinSW, [string]$Dir, [string]$Id, [string]$Name, [string]$StartMode, [string]$Arguments,
+          [string]$Python, [string]$Backend, [string]$EnvFile, [string]$Logs, [string]$PgBin, [string]$Cache)
+    $tmp = Join-Path $Cache "tmp\$Id"
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    Install-WinSWService -WinSW $WinSW -Dir $Dir -Id $Id -Name $Name -Executable $Python -Arguments $Arguments `
+        -WorkingDir $Backend -StartMode $StartMode -Account "NT SERVICE\$Id" -Logs $Logs `
+        -Depends @("RRTradingOne-PostgreSQL", "RRTradingOne-Redis") `
+        -Environment @{ PYTHONPATH = $Backend; RR_ENV_FILE = $EnvFile; RR_PG_BIN = $PgBin; PYTHONUTF8 = "1"
+                        PYTHONDONTWRITEBYTECODE = "1"; TEMP = $tmp; TMP = $tmp }
     Grant-Path $tmp "NT SERVICE\$Id" "(OI)(CI)M"
     Grant-Path (Split-Path -Parent $Backend) "NT SERVICE\$Id" "(OI)(CI)RX"
-    Info "$Id installed ($StartMode, runs as NT SERVICE\$Id)"
 }

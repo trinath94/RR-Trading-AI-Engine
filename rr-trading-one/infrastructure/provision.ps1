@@ -170,11 +170,17 @@ if (-not (Test-Path (Join-Path $PgBin "pg_ctl.exe"))) { Expand-Archive $files.po
 $pgSvc = "RRTradingOne-PostgreSQL"
 if (-not (Test-Path (Join-Path $PgData "PG_VERSION"))) {
     New-Item -ItemType Directory -Force -Path $PgData | Out-Null
-    $pwFile = Join-Path $Secrets "pg-init.tmp"
+    # initdb drops administrator rights (restricted token), so the installing user needs explicit, temporary
+    # access to the empty data folder and a password file in its own temp folder.
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Grant-Path $PgData "*$me" "(OI)(CI)F"
+    $pwDir = Join-Path $env:TEMP ("rrone-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $pwDir | Out-Null
+    $pwFile = Join-Path $pwDir "pw.txt"
     [IO.File]::WriteAllText($pwFile, $pgSuperPw)
     try {
         Invoke-Checked (Join-Path $PgBin "initdb.exe") @("-D", $PgData, "-U", "postgres", "--pwfile=$pwFile", "-A", "scram-sha-256", "-E", "UTF8", "--no-locale")
-    } finally { Remove-Item $pwFile -Force -ErrorAction SilentlyContinue }
+    } finally { Remove-Item -Recurse -Force $pwDir -ErrorAction SilentlyContinue }
     Add-Content (Join-Path $PgData "postgresql.conf") @"
 
 # RR Trading One
@@ -192,6 +198,8 @@ host    all    all    ::1/128         scram-sha-256
 "@
 }
 Grant-Path $PgData "*S-1-5-20" "(OI)(CI)F"          # NETWORK SERVICE runs PostgreSQL
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Invoke-Checked "icacls.exe" @($PgData, "/remove:g", "*$me", "/T", "/C", "/Q") | Out-Null   # drop the temporary initdb grant
 if (-not (Get-Service $pgSvc -ErrorAction SilentlyContinue)) {
     Invoke-Checked (Join-Path $PgBin "pg_ctl.exe") @("register", "-N", $pgSvc, "-U", "NT AUTHORITY\NetworkService", "-D", $PgData, "-S", "auto", "-w")
 }

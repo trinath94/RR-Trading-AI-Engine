@@ -1,0 +1,135 @@
+# RR Trading One - native Windows infrastructure, tested on Windows Server 2022 with Windows PowerShell 5.1
+# (the shell your VPS has). Provisions from scratch, verifies services/accounts/ports/health, runs the full
+# engine test suite against the native PostgreSQL + Redis, demonstrates encrypted backup and verified restore,
+# re-runs the provisioner (upgrade keeps data) and uninstalls while keeping user data.
+name: rr-trading-one
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "rr-trading-one/**"
+      - "backend/**"
+      - ".github/workflows/rr-trading-one.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-server-2022:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: powershell
+    env:
+      INSTALL_ROOT: C:\Program Files\RR Trading One
+      DATA_ROOT: C:\ProgramData\RR Trading One
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Component checksums (printed for pinning; unpinned entries filled for this CI run only)
+        run: |
+          $ProgressPreference = "SilentlyContinue"
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $c = Get-Content rr-trading-one\infrastructure\components.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\dl" | Out-Null
+          foreach ($p in $c.PSObject.Properties) {
+            if ($p.Name -like "_*") { continue }
+            $s = $p.Value
+            $f = Join-Path "$env:RUNNER_TEMP\dl" ([IO.Path]::GetFileName(([Uri]$s.url).AbsolutePath))
+            Invoke-WebRequest $s.url -OutFile $f -UseBasicParsing
+            $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+            $sig = Get-AuthenticodeSignature $f
+            "PIN $($p.Name) $($s.version) sha256=$h size=$((Get-Item $f).Length) signature=$($sig.Status) signer=$($sig.SignerCertificate.Subject)"
+            if (-not $s.sha256 -and -not $s.signer) { $s.sha256 = $h }
+          }
+          $c | ConvertTo-Json -Depth 5 | Set-Content -Encoding ascii "$env:RUNNER_TEMP\components.ci.json"
+
+      - name: Provision (fresh machine)
+        run: |
+          $pw = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ })
+          "ADMIN_PW=$pw" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          & rr-trading-one\infrastructure\provision.ps1 -ComponentsFile "$env:RUNNER_TEMP\components.ci.json" -CreateTestDatabase -AdminPassword $pw
+          if (-not $?) { throw "provision failed" }
+
+      - name: Verify services, accounts, loopback-only ports, health, worker stopped
+        run: |
+          . rr-trading-one\infrastructure\common.ps1
+          $expect = @{ "RRTradingOne-PostgreSQL" = "Running"; "RRTradingOne-Redis" = "Running"; "RRTradingOne-API" = "Running"; "RRTradingOne-Learner" = "Running"; "RRTradingOne-Worker" = "Stopped" }
+          foreach ($k in $expect.Keys) { $s = Get-Service $k; "$k $($s.Status) $($s.StartType)"; if ($s.Status -ne $expect[$k]) { throw "$k is $($s.Status), expected $($expect[$k])" } }
+          if ((Get-Service RRTradingOne-Worker).StartType -ne "Manual") { throw "worker must be Manual (stopped by default)" }
+          foreach ($k in @("RRTradingOne-API", "RRTradingOne-Learner", "RRTradingOne-Worker")) {
+            $a = (Get-CimInstance Win32_Service -Filter "Name='$k'").StartName; "$k runs as $a"
+            if ($a -ne "NT SERVICE\$k") { throw "$k must run as its virtual account" } }
+          foreach ($port in @(5432, 6379, 8000)) {
+            $l = Get-NetTCPConnection -LocalPort $port -State Listen
+            $l | ForEach-Object { "port $port listens on $($_.LocalAddress)" }
+            if ($l | Where-Object { $_.LocalAddress -notin @("127.0.0.1", "::1") }) { throw "port $port is exposed beyond loopback" } }
+          if (-not (Test-ApiHealth 8000)) { throw "API health failing" }
+          $acl = (Get-Acl "$env:DATA_ROOT\secrets").Access | ForEach-Object { "$($_.IdentityReference)" } | Sort-Object -Unique
+          "secrets ACL: $($acl -join ', ')"
+          if ($acl | Where-Object { $_ -match "Users|Everyone|Authenticated" }) { throw "secrets folder is readable by ordinary users" }
+          & rr-trading-one\infrastructure\status.ps1
+
+      - name: Engine test suite on native Windows PostgreSQL + Redis
+        run: |
+          . rr-trading-one\infrastructure\common.ps1
+          $e = Read-EnvFile "$env:DATA_ROOT\secrets\engine.env"
+          $py = "$env:INSTALL_ROOT\infrastructure\venv\Scripts\python.exe"
+          & $py -m pip install --disable-pip-version-check -q pytest keyring
+          $env:RR_DATABASE_URL = "postgresql+psycopg://rr_app:$($e['RRONE_PG_APP_PASSWORD'])@127.0.0.1:5432/rr_test"
+          $env:RR_REDIS_URL = "redis://:$($e['RRONE_REDIS_PASSWORD'])@127.0.0.1:6379/15"
+          $env:RR_PG_BIN = "$env:INSTALL_ROOT\infrastructure\pgsql\bin"
+          Set-Location backend
+          & $py -m pytest -q -p no:cacheprovider
+          if ($LASTEXITCODE -ne 0) { throw "engine tests failed on Windows" }
+
+      - name: Encrypted backup, verify and restore into a new database
+        run: |
+          $r = & rr-trading-one\infrastructure\backup.ps1 -Create -Label ci; $r
+          $file = (($r | Select-Object -Last 1) | ConvertFrom-Json).file
+          & rr-trading-one\infrastructure\backup.ps1 -Verify -File $file
+          $rep = & rr-trading-one\infrastructure\backup.ps1 -Restore -File $file -TargetDb rr_restore_demo; $rep
+          if (-not (($rep | Select-Object -Last 1) | ConvertFrom-Json).ok) { throw "restore validation failed" }
+
+      - name: Re-run provisioner (upgrade) keeps data and takes a pre-upgrade backup
+        run: |
+          $before = (Get-ChildItem "$env:DATA_ROOT\backups\*.rrbak").Count
+          & rr-trading-one\infrastructure\provision.ps1 -ComponentsFile "$env:RUNNER_TEMP\components.ci.json" -AdminPassword $env:ADMIN_PW
+          if (-not $?) { throw "re-provision failed" }
+          $after = (Get-ChildItem "$env:DATA_ROOT\backups\*.rrbak").Count
+          "backups before $before after $after"
+          if ($after -le $before) { throw "no pre-upgrade backup was taken" }
+          $login = Invoke-WebRequest -Uri http://127.0.0.1:8000/api/auth/login -Method Post -ContentType application/json -Body (@{ username = "admin"; password = $env:ADMIN_PW } | ConvertTo-Json) -UseBasicParsing -SessionVariable s
+          "login after upgrade: $($login.StatusCode)"
+          $st = Invoke-WebRequest -Uri http://127.0.0.1:8000/api/strategies -WebSession $s -UseBasicParsing
+          $n = ($st.Content | ConvertFrom-Json).Count; "strategies after upgrade: $n"
+          if ($n -ne 215) { throw "expected 215 strategies, got $n" }
+          if ((Get-Service RRTradingOne-Worker).Status -ne "Stopped") { throw "worker started by upgrade" }
+
+      - name: Logs must not contain secrets
+        run: |
+          . rr-trading-one\infrastructure\common.ps1
+          $e = Read-EnvFile "$env:DATA_ROOT\secrets\engine.env"
+          $secrets = @($e['RRONE_PG_APP_PASSWORD'], $e['RRONE_REDIS_PASSWORD'], $e['RR_JWT_SECRET'], $e['RR_ENCRYPTION_KEY'], $env:ADMIN_PW) | Where-Object { $_ }
+          $hits = Get-ChildItem "$env:DATA_ROOT\logs" -Recurse -File | Where-Object { $c = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue; $c -and ($secrets | Where-Object { $c.Contains($_) }) }
+          if ($hits) { throw "secrets found in logs: $($hits.Name -join ', ')" }
+          "no secrets in $((Get-ChildItem "$env:DATA_ROOT\logs" -Recurse -File).Count) log files"
+
+      - name: Uninstall keeps user data
+        run: |
+          & rr-trading-one\infrastructure\uninstall.ps1
+          if (Get-Service RRTradingOne-API -ErrorAction SilentlyContinue) { throw "service still installed" }
+          if (-not (Test-Path "$env:DATA_ROOT\data\postgresql\PG_VERSION")) { throw "user data was removed" }
+          if (-not (Get-ChildItem "$env:DATA_ROOT\backups\*.rrbak")) { throw "backups were removed" }
+          "uninstalled; database and backups kept"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rr-trading-one-logs
+          path: C:\ProgramData\RR Trading One\logs
+          if-no-files-found: ignore

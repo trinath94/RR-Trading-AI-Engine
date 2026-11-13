@@ -5,6 +5,7 @@ read from the environment / Docker secrets only and never shipped to the fronten
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from pydantic import Field
@@ -12,7 +13,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="RR_", extra="ignore")
+    # RR_ENV_FILE lets Windows services read the ACL-protected secrets file (RR Trading One); default unchanged.
+    model_config = SettingsConfigDict(env_file=os.environ.get("RR_ENV_FILE", ".env"), env_file_encoding="utf-8",
+                                      env_prefix="RR_", extra="ignore")
 
     environment: str = "development"  # development | production | test
     app_name: str = "RR Trading Engine"

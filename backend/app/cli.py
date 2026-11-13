@@ -114,6 +114,8 @@ def main(argv: list[str] | None = None) -> None:
     ca = sub.add_parser("create-admin")
     ca.add_argument("--username", required=True)
     sub.add_parser("gen-keys")
+    ue = sub.add_parser("user-exists")
+    ue.add_argument("--username", required=True)
     at = sub.add_parser("agent-token")
     at.add_argument("--label", default="local")
     at.add_argument("--hours", type=int, default=1)
@@ -127,6 +129,9 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(2)
         create_admin(a.username, pw)
         print("admin created")
+    elif a.cmd == "user-exists":
+        with session_scope() as db:
+            print(1 if db.scalar(select(User.id).where(User.username == a.username)) else 0)
     elif a.cmd == "agent-token":
         print(agent_token(a.label, a.hours))
     elif a.cmd == "gen-keys":

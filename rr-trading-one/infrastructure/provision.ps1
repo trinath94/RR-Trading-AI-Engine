@@ -69,9 +69,9 @@ if (-not [Environment]::Is64BitOperatingSystem) { throw "64-bit Windows is requi
 $os = Get-CimInstance Win32_OperatingSystem
 if ([int]$os.BuildNumber -lt 17763) { throw "Windows 10 1809 / Windows Server 2019 or later is required (build $($os.BuildNumber))." }
 $memGb = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
-$drive = (Get-Item $env:ProgramData).PSDrive
-$freeGb = [math]::Round((Get-PSDrive $drive.Name).Free / 1GB, 1)
-Info "$($os.Caption) build $($os.BuildNumber); RAM $memGb GB; free disk on $($drive.Name): $freeGb GB"
+$driveName = (Split-Path -Qualifier $DataRoot).TrimEnd(":")      # ProgramData is hidden; don't Get-Item it
+$freeGb = [math]::Round((Get-PSDrive $driveName).Free / 1GB, 1)
+Info "$($os.Caption) build $($os.BuildNumber); RAM $memGb GB; free disk on ${driveName}: $freeGb GB"
 if ($memGb -lt 7.5) { Warn "Less than 8 GB RAM: the AI learner and MT5 may be slow." }
 if ($freeGb -lt 10) { throw "At least 10 GB of free disk space is required." }
 foreach ($p in @($PgPort, $RedisPort, $ApiPort)) {

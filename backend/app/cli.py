@@ -93,6 +93,20 @@ def create_admin(username: str, password: str) -> None:
         db.add(User(username=username, password_hash=hash_password(password), role_id=role.id))
 
 
+def agent_token(label: str, hours: int) -> str:
+    """One-time RR MT5 Connector registration token (same as the web UI button), for unattended installs."""
+    from datetime import datetime, timedelta, timezone
+    from app.core.security import sha256
+    from app.db.models_agent import MT5AgentToken
+    from app.services.events import audit
+    token = "rrmt5_" + secrets.token_urlsafe(32)
+    with session_scope() as db:
+        db.add(MT5AgentToken(token_hash=sha256(token), label=label[:128],
+                             expires_at=datetime.now(timezone.utc) + timedelta(hours=hours)))
+        audit(db, None, "MT5_AGENT_TOKEN_CREATED", label, {"via": "cli", "hours": hours})
+    return token
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -100,6 +114,9 @@ def main(argv: list[str] | None = None) -> None:
     ca = sub.add_parser("create-admin")
     ca.add_argument("--username", required=True)
     sub.add_parser("gen-keys")
+    at = sub.add_parser("agent-token")
+    at.add_argument("--label", default="local")
+    at.add_argument("--hours", type=int, default=1)
     a = ap.parse_args(argv)
     if a.cmd == "seed":
         print(seed())
@@ -110,6 +127,8 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(2)
         create_admin(a.username, pw)
         print("admin created")
+    elif a.cmd == "agent-token":
+        print(agent_token(a.label, a.hours))
     elif a.cmd == "gen-keys":
         print(f"RR_JWT_SECRET={secrets.token_urlsafe(48)}")
         print(f"RR_ENCRYPTION_KEY={Fernet.generate_key().decode()}")

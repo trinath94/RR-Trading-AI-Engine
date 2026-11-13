@@ -122,9 +122,16 @@ function Stop-EngineServices([string[]]$names) {
 }
 
 function Set-ServiceAccount([string]$name, [string]$account) {
-    $svc = Get-CimInstance Win32_Service -Filter "Name='$name'"
-    $r = Invoke-CimMethod -InputObject $svc -MethodName Change -Arguments @{ StartName = $account; StartPassword = "" }
-    if ($r.ReturnValue -ne 0) { throw "Could not set $name to run as $account (code $($r.ReturnValue))" }
+    if ($account -like "NT SERVICE\*") {
+        # Virtual (per-service) accounts: WMI's Change() rejects them (code 22); sc.exe supports them, no password.
+        Invoke-Checked "sc.exe" @("config", $name, "obj=", $account) | Out-Null
+    } else {
+        $svc = Get-CimInstance Win32_Service -Filter "Name='$name'"
+        $r = Invoke-CimMethod -InputObject $svc -MethodName Change -Arguments @{ StartName = $account; StartPassword = "" }
+        if ($r.ReturnValue -ne 0) { throw "Could not set $name to run as $account (code $($r.ReturnValue))" }
+    }
+    $now = (Get-CimInstance Win32_Service -Filter "Name='$name'").StartName
+    if ($now -ne $account) { throw "$name runs as '$now', expected '$account'" }
 }
 
 function Invoke-Engine([string]$python, [string[]]$arguments, [string]$backend, [string]$envFile, [string]$pgBin) {
